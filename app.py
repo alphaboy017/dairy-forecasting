@@ -364,7 +364,13 @@ def create_forecasting_section(df):
         # Prepare future features
         future_features = [col for col in future_df.columns if col != 'Date']
         X_future = future_df[future_features]
-        
+
+        # Ensure X_future matches training features
+        for col in X.columns:
+            if col not in X_future.columns:
+                X_future[col] = 0  # or use a suitable default value
+        X_future = X_future[X.columns]  # Reorder columns to match training
+
         # Make predictions
         if best_scaler:
             X_future_scaled = best_scaler.transform(X_future)
