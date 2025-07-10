@@ -295,9 +295,21 @@ def create_forecasting_section(df):
     
     selected_target = st.selectbox("Select target variable for forecasting:", list(target_options.keys()))
     target_col = target_options[selected_target]
-    
+    # Robust bug checks for all target variables
+    if target_col not in df.columns:
+        st.error(f"Selected target column '{target_col}' not found in data.")
+        return
+    if df[target_col].isnull().all():
+        st.error(f"All values for '{selected_target}' are missing. Cannot forecast.")
+        return
+    if df[target_col].nunique() <= 1:
+        st.error(f"Selected target '{selected_target}' has constant or zero values. Cannot forecast.")
+        return
     # Prepare features
     X, y, df_processed = prepare_features(df.copy(), target_col)
+    if len(X) < 30:
+        st.error(f"Not enough data after feature engineering for '{selected_target}'. Try a different variable or check your data.")
+        return
     
     if st.button("🚀 Train Forecasting Models"):
         with st.spinner("Training models..."):
@@ -346,37 +358,69 @@ def create_forecasting_section(df):
         future_df['sin_month'] = np.sin(2 * np.pi * future_df['Month'] / 12)
         future_df['cos_month'] = np.cos(2 * np.pi * future_df['Month'] / 12)
         
-        # Use last known values for lag features (simplified approach)
-        last_values = df[target_col].tail(30).values
+        # Use last known values for lag features (improved approach)
+        lag_features = [1, 7, 14, 30]
+        rolling_windows = [7, 14, 30]
+        last_known = df[[target_col]].copy()
+        for lag in lag_features:
+            last_known[f'{target_col}_lag_{lag}'] = last_known[target_col].shift(lag)
+        for window in rolling_windows:
+            last_known[f'{target_col}_rolling_mean_{window}'] = last_known[target_col].rolling(window=window).mean()
+            last_known[f'{target_col}_rolling_std_{window}'] = last_known[target_col].rolling(window=window).std()
+        last_known = last_known.dropna().tail(1)
+        # For each future day, update lag/rolling features sequentially
+        future_rows = []
         for i in range(len(future_df)):
-            if i < len(last_values):
-                future_df.loc[i, f'{target_col}_lag_1'] = last_values[-(i+1)]
-                if i < len(last_values) - 7:
-                    future_df.loc[i, f'{target_col}_lag_7'] = last_values[-(i+8)]
-                if i < len(last_values) - 14:
-                    future_df.loc[i, f'{target_col}_lag_14'] = last_values[-(i+15)]
-                if i < len(last_values) - 30:
-                    future_df.loc[i, f'{target_col}_lag_30'] = last_values[-(i+31)]
-        
-        # Fill remaining NaN values with mean
-        future_df = future_df.fillna(df[target_col].mean())
-        
-        # Prepare future features
-        future_features = [col for col in future_df.columns if col != 'Date']
-        X_future = future_df[future_features]
-
+            row = future_df.iloc[i].copy()
+            # Use last forecast or last known for lag features
+            for lag in lag_features:
+                if i < lag:
+                    row[f'{target_col}_lag_{lag}'] = last_known[target_col].values[0]
+                else:
+                    row[f'{target_col}_lag_{lag}'] = future_rows[i-lag]['Forecast']
+            # Rolling features
+            for window in rolling_windows:
+                if i < window:
+                    vals = list(last_known[target_col].values) + [r['Forecast'] for r in future_rows]
+                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
+                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
+                else:
+                    vals = [r['Forecast'] for r in future_rows]
+                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
+                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
+            # Add placeholder for forecast
+            row['Forecast'] = 0
+            future_rows.append(row)
+        # Prepare DataFrame for prediction
+        future_pred_df = pd.DataFrame(future_rows)
+        future_features = [col for col in future_pred_df.columns if col not in ['Date', 'Forecast']]
+        X_future = future_pred_df[future_features]
         # Ensure X_future matches training features
         for col in X.columns:
             if col not in X_future.columns:
-                X_future[col] = 0  # or use a suitable default value
-        X_future = X_future[X.columns]  # Reorder columns to match training
-
-        # Make predictions
-        if best_scaler:
-            X_future_scaled = best_scaler.transform(X_future)
-            future_predictions = best_model.predict(X_future_scaled)
-        else:
-            future_predictions = best_model.predict(X_future)
+                X_future[col] = 0
+        X_future = X_future[X.columns]
+        # Make predictions sequentially (autoregressive)
+        for i in range(len(future_pred_df)):
+            row = X_future.iloc[i:i+1]
+            if best_scaler:
+                row_scaled = best_scaler.transform(row)
+                pred = best_model.predict(row_scaled)[0]
+            else:
+                pred = best_model.predict(row)[0]
+            future_pred_df.at[i, 'Forecast'] = pred
+            # Update lag/rolling features for next step
+            for lag in lag_features:
+                if i+lag < len(future_pred_df):
+                    future_pred_df.at[i+lag, f'{target_col}_lag_{lag}'] = pred
+            for window in rolling_windows:
+                if i+window < len(future_pred_df):
+                    vals = list(last_known[target_col].values) + list(future_pred_df['Forecast'][:i+1])
+                    mean = np.mean(vals[-window:])
+                    std = np.std(vals[-window:])
+                    future_pred_df.at[i+window, f'{target_col}_rolling_mean_{window}'] = mean
+                    future_pred_df.at[i+window, f'{target_col}_rolling_std_{window}'] = std
+        future_predictions = future_pred_df['Forecast'].values
         
         # Create forecast plot
         fig = go.Figure()
@@ -406,15 +450,41 @@ def create_forecasting_section(df):
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Display forecast table
+        # Operator-focused summary and actionable insights
+        avg_forecast = np.mean(future_predictions)
+        max_forecast = np.max(future_predictions)
+        min_forecast = np.min(future_predictions)
+        std_forecast = np.std(future_predictions)
+        st.info(f"**Forecast Summary:**  \\n        Average: {avg_forecast:.2f}  \\n        Max: {max_forecast:.2f}  \\n        Min: {min_forecast:.2f}  \\n        Std Dev: {std_forecast:.2f}")
+        # Actionable recommendations
+        high_threshold = avg_forecast + std_forecast
+        low_threshold = avg_forecast - std_forecast
+        actions = []
+        alerts = []
+        for val in future_predictions:
+            if val >= high_threshold:
+                actions.append('Increase production')
+                alerts.append('🔺 High demand')
+            elif val <= low_threshold:
+                actions.append('Monitor inventory')
+                alerts.append('🔻 Low demand')
+            else:
+                actions.append('Normal')
+                alerts.append('')
+        # Display forecast table with actions
         forecast_df = pd.DataFrame({
             'Date': future_dates,
-            'Forecast': future_predictions
+            'Forecast': np.round(future_predictions, 2),
+            'Action': actions,
+            'Alert': alerts
         })
-        forecast_df['Forecast'] = forecast_df['Forecast'].round(2)
-        
         st.markdown("### 📋 Forecast Details")
         st.dataframe(forecast_df, use_container_width=True)
+        # Alerts section
+        st.markdown("### 🚨 Alerts")
+        for i, row in forecast_df.iterrows():
+            if row['Alert']:
+                st.warning(f"{row['Date'].date()}: {row['Alert']} - {row['Action']} (Forecast: {row['Forecast']})")
 
 def create_capacity_optimization(df):
     """Create capacity optimization recommendations"""
