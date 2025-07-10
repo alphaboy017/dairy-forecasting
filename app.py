@@ -94,9 +94,9 @@ def load_data():
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
-        # Filter to last 5 years only
+        # Filter to last 1 year only (for development)
         max_date = df['Date'].max()
-        min_date = max_date - pd.DateOffset(years=5)
+        min_date = max_date - pd.DateOffset(years=1)
         df = df[df['Date'] >= min_date]
         
         # Add derived features
@@ -274,10 +274,10 @@ def prepare_features(df, target_col, forecast_days=30):
 def train_models(X, y):
     """Train multiple forecasting models"""
     models = {
-        'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
-        'XGBoost': xgb.XGBRegressor(n_estimators=100, random_state=42),
-        'LightGBM': lgb.LGBMRegressor(n_estimators=100, random_state=42),
+        'Random Forest': RandomForestRegressor(n_estimators=20, n_jobs=-1, random_state=42),
+        'Gradient Boosting': GradientBoostingRegressor(n_estimators=20, random_state=42),
+        'XGBoost': xgb.XGBRegressor(n_estimators=20, n_jobs=-1, random_state=42),
+        'LightGBM': lgb.LGBMRegressor(n_estimators=20, n_jobs=-1, random_state=42),
         'Linear Regression': LinearRegression()
     }
     
@@ -351,7 +351,15 @@ def create_forecasting_section(df):
         st.error(f"Not enough data after feature engineering for '{selected_target}'. Try a different variable or check your data.")
         return
     
+    # Only retrain if user clicks button or target changes
+    retrain = False
+    if 'last_trained' not in st.session_state:
+        st.session_state['last_trained'] = {}
     if st.button("🚀 Train Forecasting Models"):
+        retrain = True
+    if target_col not in st.session_state['last_trained']:
+        retrain = True
+    if retrain:
         with st.spinner("Training models..."):
             results, X_train, X_test, y_train, y_test = train_models(X, y)
         
