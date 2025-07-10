@@ -55,7 +55,7 @@ st.markdown("""
 def load_data():
     """Load and preprocess the dairy dataset"""
     try:
-        df = pd.read_csv('Dairy_Supply_Demand_20000.csv')
+        df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.sort_values('Date')
         
