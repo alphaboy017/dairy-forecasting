@@ -87,23 +87,24 @@ def delete_model_from_mongo(target_col):
 def list_models_in_mongo():
     return [doc['target_col'] for doc in collection.find({}, {'target_col': 1})]
 
+# Move this to the top-level (main or before load_data is called)
+st.sidebar.markdown('### Data Window')
+time_options = {
+    '6M': 182,
+    '1Y': 365,
+    '3Y': 1095,
+    '5Y': 1825,
+    'All': None
+}
+selected_window = st.sidebar.radio('Select data window:', list(time_options.keys()), index=1)
+
 @st.cache_data
-def load_data():
+def load_data(selected_window):
     """Load and preprocess the dairy dataset"""
     try:
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
-        # User-selectable time window
-        st.sidebar.markdown('### Data Window')
-        time_options = {
-            '6M': 182,
-            '1Y': 365,
-            '3Y': 1095,
-            '5Y': 1825,
-            'All': None
-        }
-        selected_window = st.sidebar.radio('Select data window:', list(time_options.keys()), index=1)
         days = time_options[selected_window]
         if days is not None:
             max_date = df['Date'].max()
@@ -688,7 +689,7 @@ def create_capacity_optimization(df):
 def main():
     """Main application function"""
     # Load data
-    df = load_data()
+    df = load_data(selected_window)
     
     if df is None:
         st.error("Failed to load data. Please check the CSV file.")
