@@ -381,6 +381,7 @@ def create_forecasting_section(df):
         
         # Display results
         st.markdown("### 📊 Model Performance Comparison")
+        table_placeholder = st.empty()
         # Create performance comparison robustly
         import math
         performance_data = []
@@ -400,9 +401,19 @@ def create_forecasting_section(df):
                 performance_data.append(row)
         if performance_data:
             performance_df = pd.DataFrame(performance_data)
-            st.dataframe(performance_df, use_container_width=True)
+            st.session_state['performance_df'] = performance_df
+            table_placeholder.dataframe(performance_df, use_container_width=True)
         else:
-            st.warning('No valid model results to display. Please check your data or try a different target variable.')
+            st.session_state['performance_df'] = None
+            table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
+    else:
+        # Not retraining, show cached table if available
+        st.markdown("### 📊 Model Performance Comparison")
+        table_placeholder = st.empty()
+        if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
+            table_placeholder.dataframe(st.session_state['performance_df'], use_container_width=True)
+        else:
+            table_placeholder.info("Train a model to see performance comparison.")
         
         # Find best model
         best_model_name = min(results.keys(), key=lambda x: results[x]['rmse'])
