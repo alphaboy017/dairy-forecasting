@@ -424,15 +424,15 @@ def create_forecasting_section(df):
         
         # Create forecast plot
         fig = go.Figure()
-        
+        # Show only last 90 days of historical data
+        historical_df = df[['Date', target_col]].sort_values('Date').tail(90)
         # Historical data
         fig.add_trace(go.Scatter(
-            x=df['Date'],
-            y=df[target_col],
+            x=historical_df['Date'],
+            y=historical_df[target_col],
             name='Historical',
             line=dict(color='blue')
         ))
-        
         # Forecast
         fig.add_trace(go.Scatter(
             x=future_dates,
@@ -440,14 +440,12 @@ def create_forecasting_section(df):
             name='Forecast',
             line=dict(color='red', dash='dash')
         ))
-        
         fig.update_layout(
             title=f'{selected_target} Forecast (Next 30 Days)',
             xaxis_title='Date',
             yaxis_title=selected_target,
             height=500
         )
-        
         st.plotly_chart(fig, use_container_width=True)
         
         # Operator-focused summary and actionable insights
