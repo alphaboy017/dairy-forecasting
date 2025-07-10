@@ -389,151 +389,38 @@ def create_forecasting_section(df):
             st.markdown("**R²:** Closer to 1 is better. Measures how well the model explains the data.")
             if rel_perf_msg:
                 st.info(rel_perf_msg)
-        else:
-            st.session_state['performance_df'] = None
-            table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
-            return  # Prevents use of best_model if no valid models
-    else:
-        # Not retraining, show cached table if available
-        st.markdown("### 📊 Model Performance Comparison")
-        table_placeholder = st.empty()
-        if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
-            table_placeholder.table(st.session_state['performance_df'])
-            model_names = st.session_state['performance_df']['Model'].tolist()
-            best_idx = st.session_state['performance_df']['RMSE'].idxmin()
-            selected_model = st.selectbox('Select model for forecasting:', model_names, index=best_idx, key='selectbox_cached')
-            st.session_state['selected_model'] = selected_model
-        else:
-            table_placeholder.info("Train a model to see performance comparison.")
-        
-        # Find best model
-        best_model_name = min(results.keys(), key=lambda x: results[x]['rmse'])
-        best_model = results[best_model_name]['model']
-        best_scaler = results[best_model_name]['scaler']
-        
-        st.success(f"🎯 Best Model: {best_model_name} (RMSE: {results[best_model_name]['rmse']:.2f})")
-        
-        # Create forecast
-        st.markdown(f"## 📈 Forecast for {selected_target}")
-        
-        # Generate future dates
-        last_date = df['Date'].max()
-        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=30, freq='D')
-        
-        # Prepare future features
-        future_df = pd.DataFrame({'Date': future_dates})
-        future_df['DayOfWeek'] = future_df['Date'].dt.dayofweek
-        future_df['Month'] = future_df['Date'].dt.month
-        future_df['Quarter'] = future_df['Date'].dt.quarter
-        future_df['Year'] = future_df['Date'].dt.year
-        
-        # Add seasonal features
-        future_df['sin_day'] = np.sin(2 * np.pi * future_df['DayOfWeek'] / 7)
-        future_df['cos_day'] = np.cos(2 * np.pi * future_df['DayOfWeek'] / 7)
-        future_df['sin_month'] = np.sin(2 * np.pi * future_df['Month'] / 12)
-        future_df['cos_month'] = np.cos(2 * np.pi * future_df['Month'] / 12)
-        
-        # Use last known values for lag features (improved approach)
-        lag_features = [1, 7, 14, 30]
-        rolling_windows = [7, 14, 30]
-        last_known = df[[target_col]].copy()
-        for lag in lag_features:
-            last_known[f'{target_col}_lag_{lag}'] = last_known[target_col].shift(lag)
-        for window in rolling_windows:
-            last_known[f'{target_col}_rolling_mean_{window}'] = last_known[target_col].rolling(window=window).mean()
-            last_known[f'{target_col}_rolling_std_{window}'] = last_known[target_col].rolling(window=window).std()
-        last_known = last_known.dropna().tail(1)
-        # For each future day, update lag/rolling features sequentially
-        future_rows = []
-        for i in range(len(future_df)):
-            row = future_df.iloc[i].copy()
-            # Use last forecast or last known for lag features
-            for lag in lag_features:
-                if i < lag:
-                    row[f'{target_col}_lag_{lag}'] = last_known[target_col].values[0]
-                else:
-                    row[f'{target_col}_lag_{lag}'] = future_rows[i-lag]['Forecast']
-            # Rolling features
-            for window in rolling_windows:
-                if i < window:
-                    vals = list(last_known[target_col].values) + [r['Forecast'] for r in future_rows]
-                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
-                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
-                else:
-                    vals = [r['Forecast'] for r in future_rows]
-                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
-                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
-            # Add placeholder for forecast
-            row['Forecast'] = 0
-            future_rows.append(row)
-        # Prepare DataFrame for prediction
-        future_pred_df = pd.DataFrame(future_rows)
-        future_features = [col for col in future_pred_df.columns if col not in ['Date', 'Forecast']]
-        X_future = future_pred_df[future_features]
-        # Ensure X_future matches training features
-        for col in X.columns:
-            if col not in X_future.columns:
-                X_future[col] = 0
-        X_future = X_future[X.columns]
-        # Make predictions sequentially (autoregressive)
-        for i in range(len(future_pred_df)):
-            row = X_future.iloc[i:i+1]
-            if best_scaler:
-                row_scaled = best_scaler.transform(row)
-                pred = best_model.predict(row_scaled)[0]
+
+        # --- Forecast chart always shown here ---
+        st.markdown(f"## 📈 Forecast Chart for {selected_target}")
+        # Get the selected model object
+        selected_model_obj = results[selected_model]['model']
+        selected_scaler = results[selected_model]['scaler']
+        # Generate future predictions using the selected model
+        X_future_for_chart = X_future.copy()
+        future_preds_chart = []
+        for i in range(len(X_future_for_chart)):
+            row = X_future_for_chart.iloc[i:i+1]
+            if selected_scaler:
+                row_scaled = selected_scaler.transform(row)
+                pred = selected_model_obj.predict(row_scaled)[0]
             else:
-                pred = best_model.predict(row)[0]
-            future_pred_df.at[i, 'Forecast'] = pred
-            # Update lag/rolling features for next step
-            for lag in lag_features:
-                if i+lag < len(future_pred_df):
-                    future_pred_df.at[i+lag, f'{target_col}_lag_{lag}'] = pred
-            for window in rolling_windows:
-                if i+window < len(future_pred_df):
-                    vals = list(last_known[target_col].values) + list(future_pred_df['Forecast'][:i+1])
-                    mean = np.mean(vals[-window:])
-                    std = np.std(vals[-window:])
-                    future_pred_df.at[i+window, f'{target_col}_rolling_mean_{window}'] = mean
-                    future_pred_df.at[i+window, f'{target_col}_rolling_std_{window}'] = std
-        future_predictions = future_pred_df['Forecast'].values
-        
-        # Time range selector for historical data
-        st.markdown('#### Select Historical Range')
-        time_options = {
-            '5D': 5,
-            '1W': 7,
-            '1M': 30,
-            '6M': 182,
-            '1Y': 365,
-            '5Y': 1825,
-            'All': None
-        }
-        selected_range = st.radio(
-            label='Historical Range',
-            options=list(time_options.keys()),
-            index=2,  # Default to 1M
-            horizontal=True
-        )
-        days = time_options[selected_range]
-        if days is not None:
-            historical_df = df[['Date', target_col]].sort_values('Date').tail(days)
-        else:
-            historical_df = df[['Date', target_col]].sort_values('Date')
-        # Create forecast plot
+                pred = selected_model_obj.predict(row)[0]
+            future_preds_chart.append(pred)
+        # Plot chart
         fig = go.Figure()
-        # Historical data
+        # Show only last 90 days of historical data
+        historical_df = df[['Date', target_col]].sort_values('Date').tail(90)
         fig.add_trace(go.Scatter(
             x=historical_df['Date'],
             y=historical_df[target_col],
             name='Historical',
             line=dict(color='blue')
         ))
-        # Forecast
         fig.add_trace(go.Scatter(
             x=future_dates,
-            y=future_predictions,
+            y=future_preds_chart,
             name='Forecast',
-            line=dict(color='red')
+            line=dict(color='red', dash='dash')
         ))
         fig.update_layout(
             title=f'{selected_target} Forecast (Next 30 Days)',
@@ -542,7 +429,8 @@ def create_forecasting_section(df):
             height=500
         )
         st.plotly_chart(fig, use_container_width=True)
-        
+
+        # --- Forecast table and operator features follow here ---
         # Scenario analysis slider
         st.markdown('#### Scenario Analysis')
         scenario_pct = st.slider('Adjust demand by (%)', -50, 50, 0, 1)
