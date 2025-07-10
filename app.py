@@ -56,7 +56,7 @@ def load_data():
     """Load and preprocess the dairy dataset"""
     try:
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
-        df['Date'] = pd.to_datetime(df['Date'])
+        df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
         
         # Add derived features
