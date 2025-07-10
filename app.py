@@ -399,13 +399,8 @@ def create_forecasting_section(df):
                 performance_data.append(row)
         if performance_data:
             performance_df = pd.DataFrame(performance_data)
-            # Highlight the best model (lowest RMSE)
-            best_idx = performance_df['RMSE'].idxmin()
-            def highlight_best(s):
-                return ['background-color: #d4edda' if i == best_idx else '' for i in range(len(s))]
-            styled_df = performance_df.style.apply(highlight_best, axis=0)
             st.session_state['performance_df'] = performance_df
-            table_placeholder.dataframe(styled_df, use_container_width=True, hide_index=True)
+            table_placeholder.table(performance_df)
         else:
             st.session_state['performance_df'] = None
             table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
@@ -414,7 +409,7 @@ def create_forecasting_section(df):
         st.markdown("### 📊 Model Performance Comparison")
         table_placeholder = st.empty()
         if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
-            table_placeholder.dataframe(st.session_state['performance_df'], use_container_width=True, hide_index=True)
+            table_placeholder.table(st.session_state['performance_df'])
         else:
             table_placeholder.info("Train a model to see performance comparison.")
         
