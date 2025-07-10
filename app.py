@@ -543,41 +543,99 @@ def create_forecasting_section(df):
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # Operator-focused summary and actionable insights
-        avg_forecast = np.mean(future_predictions)
-        max_forecast = np.max(future_predictions)
-        min_forecast = np.min(future_predictions)
-        std_forecast = np.std(future_predictions)
-        st.info(f"**Forecast Summary:**  \\n        Average: {avg_forecast:.2f}  \\n        Max: {max_forecast:.2f}  \\n        Min: {min_forecast:.2f}  \\n        Std Dev: {std_forecast:.2f}")
-        # Actionable recommendations
-        high_threshold = avg_forecast + std_forecast
-        low_threshold = avg_forecast - std_forecast
+        # Scenario analysis slider
+        st.markdown('#### Scenario Analysis')
+        scenario_pct = st.slider('Adjust demand by (%)', -50, 50, 0, 1)
+        scenario_factor = 1 + scenario_pct / 100.0
+        adjusted_forecast = future_predictions * scenario_factor
+
+        # Customizable alert thresholds
+        st.markdown('#### Alert Thresholds')
+        threshold_type = st.radio('Threshold type:', ['Standard Deviation', 'Percentage', 'Absolute Value'], horizontal=True)
+        if threshold_type == 'Standard Deviation':
+            std_mult = st.slider('Std deviation multiplier', 0.5, 3.0, 1.0, 0.1)
+            high_threshold = avg_forecast + std_mult * std_forecast
+            low_threshold = avg_forecast - std_mult * std_forecast
+        elif threshold_type == 'Percentage':
+            pct = st.slider('Percent above/below average (%)', 1, 100, 20, 1)
+            high_threshold = avg_forecast * (1 + pct / 100)
+            low_threshold = avg_forecast * (1 - pct / 100)
+        else:
+            abs_val = st.number_input('Absolute value above/below average', min_value=0.0, value=std_forecast, step=1.0)
+            high_threshold = avg_forecast + abs_val
+            low_threshold = avg_forecast - abs_val
+
+        # Operator notes/comments for forecast days
+        st.markdown('#### Operator Notes')
+        note_dates = st.multiselect('Select forecast dates to add notes:', [d.date() for d in future_dates])
+        notes_dict = {}
+        for d in note_dates:
+            note = st.text_input(f'Note for {d}', key=f'note_{d}')
+            notes_dict[str(d)] = note
+
+        # Actionable recommendations and alerts (with notes)
         actions = []
         alerts = []
-        for val in future_predictions:
+        notes_col = []
+        for i, val in enumerate(adjusted_forecast):
+            date_str = str(future_dates[i].date())
+            note = notes_dict.get(date_str, '')
+            notes_col.append(note)
             if val >= high_threshold:
                 actions.append('Increase production')
-                alerts.append('🔺 High demand')
+                alerts.append('⚠️ High demand')
             elif val <= low_threshold:
                 actions.append('Monitor inventory')
-                alerts.append('🔻 Low demand')
+                alerts.append('⚠️ Low demand')
             else:
                 actions.append('Normal')
                 alerts.append('')
-        # Display forecast table with actions
+
+        # Capacity suggestions if available
+        capacity_col = 'Capacity_Utilization' if 'Capacity_Utilization' in df.columns else None
+        capacity_flags = []
+        if capacity_col:
+            avg_capacity = df[capacity_col].mean()
+            for val in adjusted_forecast:
+                if val > avg_capacity:
+                    capacity_flags.append('⚠️ Exceeds avg capacity')
+                else:
+                    capacity_flags.append('')
+        else:
+            capacity_flags = [''] * len(adjusted_forecast)
+
+        # Display forecast table with recommendations, alerts, and notes
         forecast_df = pd.DataFrame({
             'Date': future_dates,
-            'Forecast': np.round(future_predictions, 2),
+            'Forecast': np.round(adjusted_forecast, 2),
             'Action': actions,
-            'Alert': alerts
+            'Alert': alerts,
+            'Capacity Flag': capacity_flags,
+            'Note': notes_col
         })
         st.markdown("### 📋 Forecast Details")
         st.table(forecast_df)
-        # Alerts section
-        st.markdown("### 🚨 Alerts")
+        # Download button for forecast table
+        csv = forecast_df.to_csv(index=False).encode('utf-8')
+        st.download_button('Download Forecast Table as CSV', csv, 'forecast.csv', 'text/csv')
+        # Alerts summary
+        st.markdown('### 🚨 Alerts Summary')
         for i, row in forecast_df.iterrows():
-            if row['Alert']:
-                st.warning(f"{row['Date'].date()}: {row['Alert']} - {row['Action']} (Forecast: {row['Forecast']})")
+            if row['Alert'] or row['Capacity Flag'] or row['Note']:
+                st.warning(f"{row['Date'].date()}: {row['Alert']} {row['Capacity Flag']} - {row['Action']} (Forecast: {row['Forecast']}) {row['Note']}")
+        # Dashboard summary at the top
+        n_high = sum(a == 'Increase production' for a in actions)
+        n_low = sum(a == 'Monitor inventory' for a in actions)
+        n_capacity = sum(bool(f) for f in capacity_flags)
+        n_notes = sum(bool(n) for n in notes_col)
+        st.markdown(f"### 📝 Operator Dashboard Summary\n- High demand days: {n_high}\n- Low demand days: {n_low}\n- Days exceeding capacity: {n_capacity}\n- Notes added: {n_notes}")
+        # Summary statistics
+        st.markdown('### 📊 Forecast Summary Statistics')
+        st.info(f"Average: {avg_forecast:.2f} | Min: {np.min(adjusted_forecast):.2f} | Max: {np.max(adjusted_forecast):.2f} | Std Dev: {std_forecast:.2f}")
+        # Download button for model performance table
+        if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
+            perf_csv = st.session_state['performance_df'].to_csv(index=False).encode('utf-8')
+            st.download_button('Download Model Performance Table as CSV', perf_csv, 'model_performance.csv', 'text/csv')
 
 def create_capacity_optimization(df):
     """Create capacity optimization recommendations"""
