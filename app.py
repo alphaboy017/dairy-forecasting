@@ -94,10 +94,25 @@ def load_data():
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
-        # Filter to last 1 year only (for development)
-        max_date = df['Date'].max()
-        min_date = max_date - pd.DateOffset(years=1)
-        df = df[df['Date'] >= min_date]
+        # User-selectable time window
+        st.sidebar.markdown('### Data Window')
+        time_options = {
+            '6M': 182,
+            '1Y': 365,
+            '3Y': 1095,
+            '5Y': 1825,
+            'All': None
+        }
+        selected_window = st.sidebar.radio('Select data window:', list(time_options.keys()), index=1)
+        days = time_options[selected_window]
+        if days is not None:
+            max_date = df['Date'].max()
+            min_date = max_date - pd.DateOffset(days=days)
+            df = df[df['Date'] >= min_date]
+        # Robust check for empty DataFrame after filtering
+        if df.empty:
+            st.error('No data available for the selected time window. Please choose a different window.')
+            return None
         
         # Add derived features
         df['DayOfWeek'] = df['Date'].dt.dayofweek
@@ -348,7 +363,7 @@ def create_forecasting_section(df):
     # Prepare features
     X, y, df_processed = prepare_features(df.copy(), target_col)
     if len(X) < 30:
-        st.error(f"Not enough data after feature engineering for '{selected_target}'. Try a different variable or check your data.")
+        st.error(f"Not enough data after feature engineering for '{selected_target}'. Try a different variable, a longer data window, or check your data.")
         return
     
     # Only retrain if user clicks button or target changes
