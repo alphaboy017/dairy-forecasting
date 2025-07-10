@@ -422,10 +422,30 @@ def create_forecasting_section(df):
                     future_pred_df.at[i+window, f'{target_col}_rolling_std_{window}'] = std
         future_predictions = future_pred_df['Forecast'].values
         
+        # Time range selector for historical data
+        st.markdown('#### Select Historical Range')
+        time_options = {
+            '5D': 5,
+            '1W': 7,
+            '1M': 30,
+            '6M': 182,
+            '1Y': 365,
+            '5Y': 1825,
+            'All': None
+        }
+        selected_range = st.radio(
+            label='Historical Range',
+            options=list(time_options.keys()),
+            index=2,  # Default to 1M
+            horizontal=True
+        )
+        days = time_options[selected_range]
+        if days is not None:
+            historical_df = df[['Date', target_col]].sort_values('Date').tail(days)
+        else:
+            historical_df = df[['Date', target_col]].sort_values('Date')
         # Create forecast plot
         fig = go.Figure()
-        # Show only last 90 days of historical data
-        historical_df = df[['Date', target_col]].sort_values('Date').tail(90)
         # Historical data
         fig.add_trace(go.Scatter(
             x=historical_df['Date'],
