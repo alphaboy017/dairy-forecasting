@@ -94,6 +94,10 @@ def load_data():
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
+        # Filter to last 5 years only
+        max_date = df['Date'].max()
+        min_date = max_date - pd.DateOffset(years=5)
+        df = df[df['Date'] >= min_date]
         
         # Add derived features
         df['DayOfWeek'] = df['Date'].dt.dayofweek
