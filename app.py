@@ -382,27 +382,30 @@ def create_forecasting_section(df):
         # Display results
         st.markdown("### 📊 Model Performance Comparison")
         table_placeholder = st.empty()
-        # Create performance comparison robustly
         import math
         performance_data = []
         for name, result in results.items():
             def safe_metric(val):
                 if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
-                    return 'N/A'
+                    return None
                 return round(val, 2)
             row = {
                 'Model': name,
-                'MAE': safe_metric(result['mae']),
                 'RMSE': safe_metric(result['rmse']),
                 'R²': safe_metric(result['r2'])
             }
-            # Only add if at least one metric is valid
-            if any(row[k] != 'N/A' for k in ['MAE', 'RMSE', 'R²']):
+            # Only add if both metrics are valid
+            if row['RMSE'] is not None and row['R²'] is not None:
                 performance_data.append(row)
         if performance_data:
             performance_df = pd.DataFrame(performance_data)
+            # Highlight the best model (lowest RMSE)
+            best_idx = performance_df['RMSE'].idxmin()
+            def highlight_best(s):
+                return ['background-color: #d4edda' if i == best_idx else '' for i in range(len(s))]
+            styled_df = performance_df.style.apply(highlight_best, axis=0)
             st.session_state['performance_df'] = performance_df
-            table_placeholder.dataframe(performance_df, use_container_width=True)
+            table_placeholder.dataframe(styled_df, use_container_width=True, hide_index=True)
         else:
             st.session_state['performance_df'] = None
             table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
@@ -411,7 +414,7 @@ def create_forecasting_section(df):
         st.markdown("### 📊 Model Performance Comparison")
         table_placeholder = st.empty()
         if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
-            table_placeholder.dataframe(st.session_state['performance_df'], use_container_width=True)
+            table_placeholder.dataframe(st.session_state['performance_df'], use_container_width=True, hide_index=True)
         else:
             table_placeholder.info("Train a model to see performance comparison.")
         
