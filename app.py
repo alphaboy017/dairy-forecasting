@@ -17,9 +17,6 @@ import lightgbm as lgb
 from prophet import Prophet
 import warnings
 warnings.filterwarnings('ignore')
-import joblib
-from pymongo import MongoClient
-import io
 
 # Page configuration
 st.set_page_config(
@@ -55,37 +52,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# MongoDB setup
-MONGO_URI = os.environ.get('MONGO_URI')
-MONGO_DB = 'dairy_forecasting'
-MONGO_COLLECTION = 'models'
-client = MongoClient(MONGO_URI)
-db = client[MONGO_DB]
-collection = db[MONGO_COLLECTION]
-
-def save_model_to_mongo(target_col, model, scaler, metrics):
-    buffer = io.BytesIO()
-    joblib.dump({'model': model, 'scaler': scaler, 'metrics': metrics}, buffer)
-    buffer.seek(0)
-    collection.replace_one(
-        {'target_col': target_col},
-        {'target_col': target_col, 'blob': buffer.read()},
-        upsert=True
-    )
-
-def load_model_from_mongo(target_col):
-    doc = collection.find_one({'target_col': target_col})
-    if doc:
-        buffer = io.BytesIO(doc['blob'])
-        data = joblib.load(buffer)
-        return data['model'], data['scaler'], data['metrics']
-    return None, None, None
-
-def delete_model_from_mongo(target_col):
-    collection.delete_one({'target_col': target_col})
-
-def list_models_in_mongo():
-    return [doc['target_col'] for doc in collection.find({}, {'target_col': 1})]
+# Remove MongoDB imports
+# import joblib
+# from pymongo import MongoClient
+# import io
 
 # Move this to the top-level (main or before load_data is called)
 st.sidebar.markdown('### Data Window')
@@ -404,6 +374,7 @@ def create_forecasting_section(df):
         else:
             st.session_state['performance_df'] = None
             table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
+            return  # Prevents use of best_model if no valid models
     else:
         # Not retraining, show cached table if available
         st.markdown("### 📊 Model Performance Comparison")
@@ -585,51 +556,6 @@ def create_forecasting_section(df):
         for i, row in forecast_df.iterrows():
             if row['Alert']:
                 st.warning(f"{row['Date'].date()}: {row['Alert']} - {row['Action']} (Forecast: {row['Forecast']})")
-
-    # CRUD UI for models
-    st.markdown('#### Model Persistence (MongoDB)')
-    colA, colB, colC = st.columns(3)
-    with colA:
-        if st.button('💾 Save Model to DB'):
-            if 'last_trained' in st.session_state and st.session_state['last_trained'].get(target_col):
-                model, scaler, metrics = st.session_state['last_trained'][target_col]
-                save_model_to_mongo(target_col, model, scaler, metrics)
-                st.success(f"Model for '{selected_target}' saved to MongoDB.")
-            else:
-                st.warning('Train a model first!')
-    with colB:
-        if st.button('📥 Load Model from DB'):
-            model, scaler, metrics = load_model_from_mongo(target_col)
-            if model:
-                st.session_state['loaded_model'] = (model, scaler, metrics)
-                st.success(f"Loaded model for '{selected_target}' from MongoDB.")
-            else:
-                st.error('No saved model found for this target.')
-    with colC:
-        if st.button('🗑️ Delete Model from DB'):
-            delete_model_from_mongo(target_col)
-            st.success(f"Deleted model for '{selected_target}' from MongoDB.")
-    st.markdown('**Saved Models:** ' + ', '.join(list_models_in_mongo()))
-
-    # Use loaded model if available
-    use_loaded = False
-    if 'loaded_model' in st.session_state:
-        model, scaler, metrics = st.session_state['loaded_model']
-        use_loaded = True
-    elif 'last_trained' in st.session_state and st.session_state['last_trained'].get(target_col):
-        model, scaler, metrics = st.session_state['last_trained'][target_col]
-    else:
-        model = scaler = metrics = None
-
-    # When training, after finding best_model, best_scaler, and metrics:
-    # Save to session_state for persistence
-    if 'last_trained' not in st.session_state:
-        st.session_state['last_trained'] = {}
-    st.session_state['last_trained'][target_col] = (best_model, best_scaler, {
-        'mae': results[best_model_name]['mae'],
-        'rmse': results[best_model_name]['rmse'],
-        'r2': results[best_model_name]['r2']
-    })
 
 def create_capacity_optimization(df):
     """Create capacity optimization recommendations"""
