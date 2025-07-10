@@ -258,7 +258,7 @@ def create_visualizations(df):
                                      default=['Milk_Supply_Liters', 'Total_Demand', 'Capacity_Utilization'])
         
         if summary_cols:
-            st.dataframe(df[summary_cols].describe())
+            st.table(df[summary_cols].describe())
 
 def prepare_features(df, target_col, forecast_days=30):
     """Prepare features for forecasting"""
@@ -579,7 +579,7 @@ def create_forecasting_section(df):
             'Alert': alerts
         })
         st.markdown("### 📋 Forecast Details")
-        st.dataframe(forecast_df, use_container_width=True)
+        st.table(forecast_df)
         # Alerts section
         st.markdown("### 🚨 Alerts")
         for i, row in forecast_df.iterrows():
