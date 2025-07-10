@@ -390,6 +390,64 @@ def create_forecasting_section(df):
             if rel_perf_msg:
                 st.info(rel_perf_msg)
 
+        # --- Prepare future features for forecast chart and table ---
+        # Generate future dates
+        last_date = df['Date'].max()
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=30, freq='D')
+        # Prepare future features
+        future_df = pd.DataFrame({'Date': future_dates})
+        future_df['DayOfWeek'] = future_df['Date'].dt.dayofweek
+        future_df['Month'] = future_df['Date'].dt.month
+        future_df['Quarter'] = future_df['Date'].dt.quarter
+        future_df['Year'] = future_df['Date'].dt.year
+        # Add seasonal features
+        future_df['sin_day'] = np.sin(2 * np.pi * future_df['DayOfWeek'] / 7)
+        future_df['cos_day'] = np.cos(2 * np.pi * future_df['DayOfWeek'] / 7)
+        future_df['sin_month'] = np.sin(2 * np.pi * future_df['Month'] / 12)
+        future_df['cos_month'] = np.cos(2 * np.pi * future_df['Month'] / 12)
+        # Use last known values for lag features (improved approach)
+        lag_features = [1, 7, 14, 30]
+        rolling_windows = [7, 14, 30]
+        last_known = df[[target_col]].copy()
+        for lag in lag_features:
+            last_known[f'{target_col}_lag_{lag}'] = last_known[target_col].shift(lag)
+        for window in rolling_windows:
+            last_known[f'{target_col}_rolling_mean_{window}'] = last_known[target_col].rolling(window=window).mean()
+            last_known[f'{target_col}_rolling_std_{window}'] = last_known[target_col].rolling(window=window).std()
+        last_known = last_known.dropna().tail(1)
+        # For each future day, update lag/rolling features sequentially
+        future_rows = []
+        for i in range(len(future_df)):
+            row = future_df.iloc[i].copy()
+            # Use last forecast or last known for lag features
+            for lag in lag_features:
+                if i < lag:
+                    row[f'{target_col}_lag_{lag}'] = last_known[target_col].values[0]
+                else:
+                    row[f'{target_col}_lag_{lag}'] = future_rows[i-lag]['Forecast']
+            # Rolling features
+            for window in rolling_windows:
+                if i < window:
+                    vals = list(last_known[target_col].values) + [r['Forecast'] for r in future_rows]
+                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
+                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
+                else:
+                    vals = [r['Forecast'] for r in future_rows]
+                    row[f'{target_col}_rolling_mean_{window}'] = np.mean(vals[-window:])
+                    row[f'{target_col}_rolling_std_{window}'] = np.std(vals[-window:])
+            # Add placeholder for forecast
+            row['Forecast'] = 0
+            future_rows.append(row)
+        # Prepare DataFrame for prediction
+        future_pred_df = pd.DataFrame(future_rows)
+        future_features = [col for col in future_pred_df.columns if col not in ['Date', 'Forecast']]
+        X_future = future_pred_df[future_features]
+        # Ensure X_future matches training features
+        for col in X.columns:
+            if col not in X_future.columns:
+                X_future[col] = 0
+        X_future = X_future[X.columns]
+
         # --- Forecast chart always shown here ---
         st.markdown(f"## 📈 Forecast Chart for {selected_target}")
         # Get the selected model object
@@ -406,6 +464,19 @@ def create_forecasting_section(df):
             else:
                 pred = selected_model_obj.predict(row)[0]
             future_preds_chart.append(pred)
+        # Confidence/uncertainty band
+        lower_band = None
+        upper_band = None
+        if selected_model.lower() == 'prophet':
+            # If Prophet, use its built-in intervals (not implemented here, placeholder)
+            pass
+        else:
+            # Use std of residuals from test set as a simple band
+            y_test = results[selected_model]['y_test']
+            y_pred = results[selected_model]['y_pred']
+            residual_std = np.std(np.array(y_test) - np.array(y_pred))
+            lower_band = np.array(future_preds_chart) - residual_std
+            upper_band = np.array(future_preds_chart) + residual_std
         # Plot chart
         fig = go.Figure()
         # Show only last 90 days of historical data
@@ -416,12 +487,50 @@ def create_forecasting_section(df):
             name='Historical',
             line=dict(color='blue')
         ))
+        # Forecast line
         fig.add_trace(go.Scatter(
             x=future_dates,
             y=future_preds_chart,
             name='Forecast',
             line=dict(color='red', dash='dash')
         ))
+        # Uncertainty/confidence band
+        if lower_band is not None and upper_band is not None:
+            fig.add_traces([
+                go.Scatter(
+                    x=future_dates,
+                    y=upper_band,
+                    mode='lines',
+                    line=dict(width=0),
+                    showlegend=False
+                ),
+                go.Scatter(
+                    x=future_dates,
+                    y=lower_band,
+                    mode='lines',
+                    fill='tonexty',
+                    fillcolor='rgba(255,0,0,0.1)',
+                    line=dict(width=0),
+                    name='Uncertainty Band'
+                )
+            ])
+        # Markers for flagged days
+        high_x = [future_dates[i] for i, a in enumerate(actions) if a == 'Increase production']
+        high_y = [future_preds_chart[i] for i, a in enumerate(actions) if a == 'Increase production']
+        low_x = [future_dates[i] for i, a in enumerate(actions) if a == 'Monitor inventory']
+        low_y = [future_preds_chart[i] for i, a in enumerate(actions) if a == 'Monitor inventory']
+        cap_x = [future_dates[i] for i, f in enumerate(capacity_flags) if f]
+        cap_y = [future_preds_chart[i] for i, f in enumerate(capacity_flags) if f]
+        note_x = [future_dates[i] for i, n in enumerate(notes_col) if n]
+        note_y = [future_preds_chart[i] for i, n in enumerate(notes_col) if n]
+        if high_x:
+            fig.add_trace(go.Scatter(x=high_x, y=high_y, mode='markers', marker=dict(color='orange', size=10, symbol='triangle-up'), name='High Demand'))
+        if low_x:
+            fig.add_trace(go.Scatter(x=low_x, y=low_y, mode='markers', marker=dict(color='purple', size=10, symbol='triangle-down'), name='Low Demand'))
+        if cap_x:
+            fig.add_trace(go.Scatter(x=cap_x, y=cap_y, mode='markers', marker=dict(color='black', size=10, symbol='x'), name='Exceeds Capacity'))
+        if note_x:
+            fig.add_trace(go.Scatter(x=note_x, y=note_y, mode='markers', marker=dict(color='green', size=10, symbol='star'), name='Operator Note'))
         fig.update_layout(
             title=f'{selected_target} Forecast (Next 30 Days)',
             xaxis_title='Date',
@@ -435,21 +544,25 @@ def create_forecasting_section(df):
         st.markdown('#### Scenario Analysis')
         scenario_pct = st.slider('Adjust demand by (%)', -50, 50, 0, 1)
         scenario_factor = 1 + scenario_pct / 100.0
-        adjusted_forecast = future_predictions * scenario_factor
+        adjusted_forecast = future_preds_chart * scenario_factor
 
         # Customizable alert thresholds
         st.markdown('#### Alert Thresholds')
         threshold_type = st.radio('Threshold type:', ['Standard Deviation', 'Percentage', 'Absolute Value'], horizontal=True)
         if threshold_type == 'Standard Deviation':
             std_mult = st.slider('Std deviation multiplier', 0.5, 3.0, 1.0, 0.1)
+            avg_forecast = np.mean(adjusted_forecast)
+            std_forecast = np.std(adjusted_forecast)
             high_threshold = avg_forecast + std_mult * std_forecast
             low_threshold = avg_forecast - std_mult * std_forecast
         elif threshold_type == 'Percentage':
             pct = st.slider('Percent above/below average (%)', 1, 100, 20, 1)
+            avg_forecast = np.mean(adjusted_forecast)
             high_threshold = avg_forecast * (1 + pct / 100)
             low_threshold = avg_forecast * (1 - pct / 100)
         else:
             abs_val = st.number_input('Absolute value above/below average', min_value=0.0, value=std_forecast, step=1.0)
+            avg_forecast = np.mean(adjusted_forecast)
             high_threshold = avg_forecast + abs_val
             low_threshold = avg_forecast - abs_val
 
