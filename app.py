@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -55,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # MongoDB setup
-MONGO_URI = 'MONGO_URI = mongodb+srv://vatsalnp7:vatsalnp7@cluster0.fe57n.mongodb.net/'
+MONGO_URI = os.environ.get('MONGO_URI')
 MONGO_DB = 'dairy_forecasting'
 MONGO_COLLECTION = 'models'
 client = MongoClient(MONGO_URI)
