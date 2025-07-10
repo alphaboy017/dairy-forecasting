@@ -58,31 +58,20 @@ st.markdown("""
 # import io
 
 # Move this to the top-level (main or before load_data is called)
-st.sidebar.markdown('### Data Window')
-time_options = {
-    '6M': 182,
-    '1Y': 365,
-    '3Y': 1095,
-    '5Y': 1825,
-    'All': None
-}
-selected_window = st.sidebar.radio('Select data window:', list(time_options.keys()), index=1)
+# Remove Data Window selection from sidebar
+# st.sidebar.markdown('### Data Window')
+# time_options = {...}
+# selected_window = st.sidebar.radio(...)
 
-@st.cache_data
-def load_data(selected_window):
+def load_data():
     """Load and preprocess the dairy dataset"""
     try:
         df = pd.read_csv('Dairy_Supply_Demand_2014_to_2024.csv')
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
         df = df.sort_values('Date')
-        days = time_options[selected_window]
-        if days is not None:
-            max_date = df['Date'].max()
-            min_date = max_date - pd.DateOffset(days=days)
-            df = df[df['Date'] >= min_date]
-        # Robust check for empty DataFrame after filtering
+        # No filtering by data window, use all data
         if df.empty:
-            st.error('No data available for the selected time window. Please choose a different window.')
+            st.error('No data available in the dataset.')
             return None
         
         # Add derived features
@@ -369,8 +358,37 @@ def create_forecasting_section(df):
                 performance_data.append(row)
         if performance_data:
             performance_df = pd.DataFrame(performance_data)
+            # Highlight the best model (lowest RMSE)
+            best_idx = performance_df['RMSE'].idxmin()
+            best_rmse = performance_df.loc[best_idx, 'RMSE']
+            # Add 'Best' badge
+            performance_df['Best'] = ['✅ Best' if i == best_idx else '' for i in range(len(performance_df))]
+            # Show relative performance improvement
+            sorted_rmse = performance_df['RMSE'].sort_values().values
+            if len(sorted_rmse) > 1:
+                improvement = 100 * (sorted_rmse[1] - sorted_rmse[0]) / sorted_rmse[1]
+                rel_perf_msg = f"The best model is {improvement:.1f}% better (lower RMSE) than the next best."
+            else:
+                rel_perf_msg = ""
+            # Warn about suspicious results
+            suspicious = performance_df[(performance_df['RMSE'] == 0) | (performance_df['R²'] == 1)]
+            if not suspicious.empty:
+                st.warning("Some models have RMSE=0 or R²=1. This may indicate overfitting or a bug.")
+            # Show table with best row highlighted
+            def highlight_best_row(row):
+                return ['background-color: #d4edda' if row.name == best_idx else '' for _ in row]
             st.session_state['performance_df'] = performance_df
             table_placeholder.table(performance_df)
+            # Model selection dropdown
+            model_names = performance_df['Model'].tolist()
+            default_model = performance_df.loc[best_idx, 'Model']
+            selected_model = st.selectbox('Select model for forecasting:', model_names, index=best_idx)
+            st.session_state['selected_model'] = selected_model
+            # Explanations
+            st.markdown("**RMSE:** Lower is better. Measures average prediction error.  ")
+            st.markdown("**R²:** Closer to 1 is better. Measures how well the model explains the data.")
+            if rel_perf_msg:
+                st.info(rel_perf_msg)
         else:
             st.session_state['performance_df'] = None
             table_placeholder.warning('No valid model results to display. Please check your data or try a different target variable.')
@@ -381,6 +399,10 @@ def create_forecasting_section(df):
         table_placeholder = st.empty()
         if 'performance_df' in st.session_state and st.session_state['performance_df'] is not None:
             table_placeholder.table(st.session_state['performance_df'])
+            model_names = st.session_state['performance_df']['Model'].tolist()
+            best_idx = st.session_state['performance_df']['RMSE'].idxmin()
+            selected_model = st.selectbox('Select model for forecasting:', model_names, index=best_idx, key='selectbox_cached')
+            st.session_state['selected_model'] = selected_model
         else:
             table_placeholder.info("Train a model to see performance comparison.")
         
@@ -624,7 +646,7 @@ def create_capacity_optimization(df):
 def main():
     """Main application function"""
     # Load data
-    df = load_data(selected_window)
+    df = load_data()
     
     if df is None:
         st.error("Failed to load data. Please check the CSV file.")
