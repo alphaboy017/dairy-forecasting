@@ -414,7 +414,7 @@ def create_forecasting_section(df):
         st.success(f"🎯 Best Model: {best_model_name} (RMSE: {results[best_model_name]['rmse']:.2f})")
         
         # Create forecast
-        st.markdown("### 🔮 Future Forecast")
+        st.markdown(f"## 📈 Forecast for {selected_target}")
         
         # Generate future dates
         last_date = df['Date'].max()
