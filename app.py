@@ -365,19 +365,28 @@ def create_forecasting_section(df):
         
         # Display results
         st.markdown("### 📊 Model Performance Comparison")
-        
-        # Create performance comparison
+        # Create performance comparison robustly
+        import math
         performance_data = []
         for name, result in results.items():
-            performance_data.append({
+            def safe_metric(val):
+                if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
+                    return 'N/A'
+                return round(val, 2)
+            row = {
                 'Model': name,
-                'MAE': result['mae'],
-                'RMSE': result['rmse'],
-                'R²': result['r2']
-            })
-        
-        performance_df = pd.DataFrame(performance_data)
-        st.dataframe(performance_df, use_container_width=True)
+                'MAE': safe_metric(result['mae']),
+                'RMSE': safe_metric(result['rmse']),
+                'R²': safe_metric(result['r2'])
+            }
+            # Only add if at least one metric is valid
+            if any(row[k] != 'N/A' for k in ['MAE', 'RMSE', 'R²']):
+                performance_data.append(row)
+        if performance_data:
+            performance_df = pd.DataFrame(performance_data)
+            st.dataframe(performance_df, use_container_width=True)
+        else:
+            st.warning('No valid model results to display. Please check your data or try a different target variable.')
         
         # Find best model
         best_model_name = min(results.keys(), key=lambda x: results[x]['rmse'])
