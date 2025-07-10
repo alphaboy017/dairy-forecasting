@@ -506,7 +506,7 @@ def create_forecasting_section(df):
             x=future_dates,
             y=future_predictions,
             name='Forecast',
-            line=dict(color='red', dash='dash')
+            line=dict(color='red')
         ))
         fig.update_layout(
             title=f'{selected_target} Forecast (Next 30 Days)',
